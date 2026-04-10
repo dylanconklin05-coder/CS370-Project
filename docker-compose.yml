@@ -49,6 +49,42 @@ services:
               count: all
               capabilities: [gpu]
 
+              # ── STT (Speech-to-Text) — CPU only ────────────────────────────────
+  whisper-cpu:
+    container_name: foreign-whispers-stt
+    profiles: [cpu]
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - whisper-cache:/home/ubuntu/.cache/huggingface/hub
+    environment:
+      - WHISPER__MODEL=Systran/faster-whisper-base
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://0.0.0.0:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── TTS (Text-to-Speech) — Chatterbox on CPU ──────────────────────
+  chatterbox-cpu:
+    container_name: foreign-whispers-tts
+    profiles: [cpu]
+    image: travisvn/chatterbox-tts-api:latest
+    restart: unless-stopped
+    shm_size: "2gb"
+    ports:
+      - "8020:8020"
+    environment:
+      - DEVICE=cpu
+      - DEFAULT_MODEL=multilingual
+      - PORT=8020
+    volumes:
+      - chatterbox-models:/app/models
+      - ./pipeline_data/speakers:/app/voices
+
   # ── API (CPU orchestrator) — all profiles ─────────────────────────
   # The API container is CPU-only. It delegates GPU work to the STT
   # and TTS containers above via HTTP.
@@ -62,10 +98,13 @@ services:
         USER_UID: "${UID:-1000}"
         USER_GID: "${GID:-1000}"
     restart: unless-stopped
-    network_mode: host
+    #network_mode: host
+    ports:
+      - "8080:8080"
     command: ["uv", "run", "uvicorn", "api.src.main:app", "--host", "0.0.0.0", "--port", "8080"]
     environment:
-      - CHATTERBOX_API_URL=http://localhost:8020
+      #- CHATTERBOX_API_URL=http://localhost:8020
+      - CHATTERBOX_API_URL=http://foreign-whispers-tts:8020
       - FW_WHISPER_MODEL=base
     volumes:
       - ./pipeline_data:/app/pipeline_data
@@ -81,9 +120,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    network_mode: host
+    #network_mode: host
+    ports:
+      - "8501:8501"
     environment:
-      - API_URL=http://localhost:8080
+      #- API_URL=http://localhost:8080
+      - API_URL=http://foreign-whispers-api:8080
       - HOSTNAME=0.0.0.0
       - PORT=8501
     healthcheck:
