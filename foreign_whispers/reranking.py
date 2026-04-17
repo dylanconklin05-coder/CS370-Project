@@ -7,6 +7,7 @@ SegmentMetrics.  The translation re-ranking function is a **student assignment**
 
 import dataclasses
 import logging
+from transformers import MarianMTModel, MarianTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +158,78 @@ def get_shorter_translations(
     Returns:
         Empty list (stub).  Implement to return ``TranslationCandidate`` items.
     """
+    max_chars = int(target_duration_s * 15)
+    candidates: list[TranslationCandidate] = []
+
     logger.info(
-        "get_shorter_translations called for %.1fs budget (%d chars baseline) — "
-        "returning empty list (student assignment stub).",
+        "get_shorter_translations called for %.1fs budget (%d chars baseline).",
         target_duration_s,
         len(baseline_es),
     )
-    return []
+
+    def clean_text(text: str) -> str:
+        return " ".join(text.strip().split())
+
+    baseline_clean = clean_text(baseline_es)
+
+    # Case 1: already fits
+    if len(baseline_clean) <= max_chars:
+        candidates.append(
+            TranslationCandidate(
+                text=baseline_clean,
+                char_count=len(baseline_clean),
+                brevity_rationale="baseline fits duration"
+            )
+        )
+        return candidates
+
+    # Case 2: MarianMT translation
+    try:
+        model_name = "Helsinki-NLP/opus-mt-en-es"
+        tokenizer = MarianTokenizer.from_pretrained(model_name)
+        model = MarianMTModel.from_pretrained(model_name)
+        inputs = tokenizer([source_text], return_tensors="pt", padding=True)
+        translated = model.generate(**inputs)
+        marian_text = tokenizer.decode(translated[0], skip_special_tokens=True)
+        marian_text = clean_text(marian_text)
+        candidates.append(
+            TranslationCandidate(
+                text=marian_text,
+                char_count=len(marian_text),
+                brevity_rationale="MarianMT translation"
+            )
+        )
+    except Exception as e:
+        logger.warning("MarianMT failed: %s", e)
+
+    # Case 3: keep first clause only (split on comma)
+    if "," in baseline_clean:
+        first_clause = clean_text(baseline_clean.split(",")[0])
+        candidates.append(
+            TranslationCandidate(
+                text=first_clause,
+                char_count=len(first_clause),
+                brevity_rationale="kept primary clause only"
+            )
+        )
+
+    # Case 4: aggressive truncate fallback
+    truncated = baseline_clean[:max_chars].rsplit(" ", 1)[0].strip()
+    if truncated:
+        candidates.append(
+            TranslationCandidate(
+                text=truncated,
+                char_count=len(truncated),
+                brevity_rationale="truncated to fit duration"
+            )
+        )
+
+    # Remove duplicates
+    unique = {}
+    for c in candidates:
+        unique[c.text] = c
+    candidates = list(unique.values())
+
+    # Sort shortest first
+    candidates.sort(key=lambda c: c.char_count)
+    return candidates
