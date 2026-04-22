@@ -27,6 +27,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "logfire",
     "jupyterlab>=4.5.6",
+    "transformers>=4.45.2",
 ]
 
 [dependency-groups]

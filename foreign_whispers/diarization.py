@@ -43,3 +43,45 @@ def diarize_audio(audio_path: str, hf_token: str | None = None) -> list[dict]:
     except Exception as exc:
         logger.warning("Diarization failed for %s: %s", audio_path, exc)
         return []
+def assign_speakers(
+    segments: list[dict],
+    diarization: list[dict],
+) -> list[dict]:
+    """Assign a speaker label to each transcription segment.
+
+    For each segment, finds the diarization interval with the greatest
+    temporal overlap and copies its speaker label. If diarization is
+    empty, all segments default to ``SPEAKER_00``.
+
+    Args:
+        segments: Whisper-style ``[{id, start, end, text, ...}]``.
+        diarization: pyannote-style ``[{start_s, end_s, speaker}]``.
+
+    Returns:
+        New list of segment dicts, each with an added ``speaker`` key.
+        Original list is not mutated.
+    """
+    result = []
+
+    for seg in segments:
+        seg_copy = dict(seg)
+        seg_start = seg["start"]
+        seg_end = seg["end"]
+
+        best_speaker = "SPEAKER_00"
+        best_overlap = 0.0
+
+        for interval in diarization:
+            diar_start = interval["start_s"]
+            diar_end = interval["end_s"]
+
+            overlap = max(0, min(seg_end, diar_end) - max(seg_start, diar_start))
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = interval["speaker"]
+
+        seg_copy["speaker"] = best_speaker
+        result.append(seg_copy)
+
+    return result
