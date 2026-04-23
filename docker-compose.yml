@@ -106,6 +106,7 @@ services:
       #- CHATTERBOX_API_URL=http://localhost:8020
       - CHATTERBOX_API_URL=http://foreign-whispers-tts:8020
       - FW_WHISPER_MODEL=base
+      - FW_HF_TOKEN=${HF_TOKEN}
     volumes:
       - ./pipeline_data:/app/pipeline_data
       - ./foreign_whispers:/app/foreign_whispers
