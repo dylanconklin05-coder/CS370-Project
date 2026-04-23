@@ -17,9 +17,26 @@ class TTSService:
         self.ui_dir = ui_dir
         self.tts_engine = tts_engine
 
-    def text_file_to_speech(self, source_path: str, output_path: str, *, alignment: bool | None = None) -> None:
-        """Generate time-aligned TTS audio from a translated JSON transcript."""
-        tts_text_file_to_speech(source_path, output_path, self.tts_engine, alignment=alignment)
+    def text_file_to_speech(
+        self,
+        source_path: str,
+        output_path: str,
+        *,
+        alignment: bool | None = None,
+        speaker_voices: dict[str, str] | None = None
+    ) -> None:
+        """Generate time-aligned TTS audio from a translated JSON transcript.
+        
+        speaker_voices: optional dict mapping speaker label to voice WAV path
+        e.g. {"SPEAKER_00": "voice1.wav", "SPEAKER_01": "voice2.wav"}
+        """
+        tts_text_file_to_speech(
+            source_path,
+            output_path,
+            self.tts_engine,
+            alignment=alignment,
+            speaker_voices=speaker_voices,
+        )
 
     @staticmethod
     def title_for_video_id(video_id: str, search_dir: pathlib.Path) -> str | None:
@@ -43,3 +60,4 @@ class TTSService:
         from foreign_whispers.alignment import compute_segment_metrics, global_align
         metrics = compute_segment_metrics(en_transcript, es_transcript)
         return global_align(metrics, silence_regions, max_stretch)
+    
