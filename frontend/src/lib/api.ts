@@ -1,6 +1,7 @@
 import type {
   DownloadResponse,
   TranscribeResponse,
+  DiarizeResponse,
   TranslateResponse,
   TTSResponse,
   StitchResponse,
@@ -88,4 +89,10 @@ export function getCaptionsUrl(videoId: string): string {
 
 export function getOriginalCaptionsUrl(videoId: string): string {
   return `/api/captions/${videoId}/original`;
+}
+
+export async function diarizeVideo(videoId: string): Promise<DiarizeResponse> {
+  return fetchJson<DiarizeResponse>(`/api/diarize/${videoId}`, {
+    method: "POST",
+  });
 }

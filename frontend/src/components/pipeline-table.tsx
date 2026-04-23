@@ -15,6 +15,7 @@ import {
   LanguagesIcon,
   Volume2Icon,
   ScissorsIcon,
+  UsersIcon,
 } from "lucide-react";
 import { useElapsed } from "@/hooks/use-elapsed";
 import type { PipelineStage, PipelineState, StageState, StudioSettings } from "@/lib/types";
@@ -28,6 +29,7 @@ const STAGES: {
 }[] = [
   { key: "download", label: "Download", icon: DownloadIcon, description: "Fetch video + captions from YouTube" },
   { key: "transcribe", label: "Transcribe", icon: MicIcon, description: "Speech-to-text via Whisper" },
+  { key: "diarize", label: "Diarize", icon: UsersIcon, description: "Speaker identification via pyannote" },
   { key: "translate", label: "Translate", icon: LanguagesIcon, description: "English to Spanish translation" },
   { key: "tts", label: "TTS", icon: Volume2Icon, description: "Text-to-speech synthesis" },
   { key: "stitch", label: "Stitch", icon: ScissorsIcon, description: "Combine audio + video + subtitles" },
@@ -118,6 +120,8 @@ export function PipelineTable({ pipelineState, settings }: PipelineTableProps) {
       }
       case "stitch":
         return "ffmpeg + moviepy";
+      case "diarize":
+        return "pyannote/speaker-diarization-3.1";
       default:
         return "--";
     }
