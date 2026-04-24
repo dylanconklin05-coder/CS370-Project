@@ -34,20 +34,17 @@ def _count_syllables(text: str) -> int:
 
 # MY IMPLEMENTATION ------------------------------------------------------------------------------------------------------
 def _estimate_duration(text: str) -> float:
-    """Estimate TTS duration using a regression model trained on ground-truth data.
-
-    Replaces the crude syllables/4.5 heuristic with a linear regression model
-    trained on actual Chatterbox TTS output durations.
-
-    Coefficients derived from ground-truth TTS data:
-        duration = 0.112 * syllables + 0.137 * words + 0.766
-
-    Mean absolute error: ~0.30s vs 1.80s for syllables/4.5 heuristic.
-    Calibration: MAE 0.29s (short), 0.28s (medium), 0.93s (long segments).
+    """Estimate TTS duration using regression trained on ground-truth data.
+    
+    Uses pyphen for accurate Spanish syllabification.
+    MAE: 0.31s vs 0.63s for chars/15 baseline.
     """
-    syllables = _count_syllables(text)
-    words = len(text.split())
-    return 0.112 * syllables + 0.137 * words + 0.766
+    import pyphen
+    dic = pyphen.Pyphen(lang='es')
+    words = text.split()
+    syllables = max(1, sum(dic.inserted(w).count('-') + 1 for w in words))
+    n_words = len(words)
+    return max(0.4, 0.112 * syllables + 0.137 * n_words + 0.766)
 
 @dataclasses.dataclass
 class SegmentMetrics:
@@ -306,3 +303,130 @@ def global_align(
         cumulative_drift += gap_shift
 
     return aligned
+
+def global_align_dp(
+    metrics: list[SegmentMetrics],
+    silence_regions: list[dict],
+    max_stretch: float = 1.4,
+    beam_width: int = 10,
+) -> list[AlignedSegment]:
+    """Beam search global alignment — improved over greedy.
+
+    Explores multiple scheduling paths and selects the globally best one
+    using a scoring function that balances drift, stretch, and failures.
+    """
+
+    def _silence_after(end_s: float) -> float:
+        for r in silence_regions:
+            if r.get("label") == "silence" and r["start_s"] >= end_s - 0.1:
+                return r["end_s"] - r["start_s"]
+        return 0.0
+
+    def _score(segments: list[AlignedSegment], drift: float) -> float:
+        # Penalize stretch smoothly
+        stretch_penalty = sum((s.stretch_factor - 1.0) ** 2 for s in segments)
+
+        # Hard penalties
+        severe = sum(1 for s in segments if s.stretch_factor > max_stretch)
+
+        overlaps = sum(
+            1 for i in range(len(segments) - 1)
+            if segments[i].scheduled_end > segments[i + 1].scheduled_start + 0.01
+        )
+
+        failures = sum(
+            1 for s in segments
+            if s.action in (AlignAction.REQUEST_SHORTER, AlignAction.FAIL)
+        )
+
+        return (
+            0.5 * abs(drift)
+            + 2.0 * stretch_penalty
+            + 3.0 * severe
+            + 5.0 * overlaps
+            + 4.0 * failures
+        )
+
+    # Beam state: (score, drift, aligned_segments)
+    beams = [(0.0, 0.0, [])]
+
+    for m in metrics:
+        available_gap = _silence_after(m.source_end)
+        base_action = decide_action(m, available_gap_s=available_gap)
+
+        new_beams = []
+
+        for beam_score, drift, segments in beams:
+            options = []
+
+            # --- Option 1: Greedy baseline decision ---
+            gap_shift = 0.0
+            stretch = 1.0
+
+            if base_action == AlignAction.GAP_SHIFT:
+                gap_shift = min(m.overflow_s, available_gap)
+            elif base_action == AlignAction.MILD_STRETCH:
+                stretch = min(m.predicted_stretch, max_stretch)
+
+            options.append((base_action, gap_shift, stretch))
+
+            # --- Option 2: Force ACCEPT (no change) ---
+            if base_action != AlignAction.ACCEPT:
+                options.append((AlignAction.ACCEPT, 0.0, 1.0))
+
+            # --- Option 3: Partial gap shift (save some silence) ---
+            if available_gap > 0 and m.overflow_s > 0:
+                partial_gap = min(m.overflow_s * 0.5, available_gap)
+                options.append((AlignAction.GAP_SHIFT, partial_gap, 1.0))
+
+            # --- Option 4: Conservative stretch (cap at 1.2x) ---
+            if m.predicted_stretch > 1.0:
+                options.append((
+                    AlignAction.MILD_STRETCH,
+                    0.0,
+                    min(m.predicted_stretch, 1.2)
+                ))
+
+            # --- Option 5: Full stretch alternative (IMPORTANT) ---
+            if m.overflow_s > 0:
+                stretch_needed = (m.source_duration_s + m.overflow_s) / m.source_duration_s
+                options.append((
+                    AlignAction.MILD_STRETCH,
+                    0.0,
+                    min(stretch_needed, max_stretch)
+                ))
+
+            # --- Evaluate all options ---
+            for action, gap, stretch_f in options:
+                gap = min(gap, available_gap)  # safety clamp
+
+                effective_duration = m.source_duration_s * stretch_f
+
+                sched_start = m.source_start + drift
+                sched_end = sched_start + effective_duration + gap
+
+                seg = AlignedSegment(
+                    index=m.index,
+                    original_start=m.source_start,
+                    original_end=m.source_end,
+                    scheduled_start=sched_start,
+                    scheduled_end=sched_end,
+                    text=m.translated_text,
+                    action=action,
+                    gap_shift_s=gap,
+                    stretch_factor=stretch_f,
+                )
+
+                new_drift = drift + gap
+                new_segments = segments + [seg]
+                new_score = _score(new_segments, new_drift)
+
+                new_beams.append((new_score, new_drift, new_segments))
+
+        # Keep best K beams
+        new_beams.sort(key=lambda x: x[0])
+        beams = new_beams[:beam_width]
+
+    # Return best solution
+    best_score, best_drift, best_segments = beams[0]
+    return best_segments
