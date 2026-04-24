@@ -8,6 +8,7 @@ SegmentMetrics.  The translation re-ranking function is a **student assignment**
 import dataclasses
 import logging
 from transformers import MarianMTModel, MarianTokenizer
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -231,5 +232,29 @@ def get_shorter_translations(
     candidates = list(unique.values())
 
     # Sort shortest first
-    candidates.sort(key=lambda c: c.char_count)
+    # ── Score candidates by duration fit + semantic similarity ────────
+    try:
+        from sentence_transformers import SentenceTransformer
+        st_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        baseline_emb = st_model.encode(baseline_es)
+        lam = 0.3
+
+        def score(c: TranslationCandidate) -> float:
+            from foreign_whispers.alignment import _estimate_duration
+            predicted = _estimate_duration(c.text)
+            duration_penalty = (predicted - target_duration_s) ** 2
+            cand_emb = st_model.encode(c.text)
+            cos_sim = float(
+                sum(a * b for a, b in zip(baseline_emb, cand_emb)) /
+                (sum(a**2 for a in baseline_emb) ** 0.5 *
+                 sum(b**2 for b in cand_emb) ** 0.5)
+            )
+            semantic_distance = 1.0 - cos_sim
+            return duration_penalty + lam * semantic_distance
+
+        candidates.sort(key=score)
+    except Exception as e:
+        logger.warning("Semantic scoring failed: %s", e)
+        candidates.sort(key=lambda c: c.char_count)
+
     return candidates
