@@ -17,14 +17,11 @@ class TTSService:
         self.ui_dir = ui_dir
         self.tts_engine = tts_engine
 
-    def text_file_to_speech(
-        self,
-        source_path: str,
-        output_path: str,
-        *,
-        alignment: bool | None = None,
-        speaker_voices: dict[str, str] | None = None
-    ) -> None:
+    def text_file_to_speech(self, source_path: str, output_path: str,
+                        *, alignment: bool | None = None,
+                        speaker_wav: str | None = None) -> None:
+        tts_text_file_to_speech(source_path, output_path, self.tts_engine,
+                            alignment=alignment, speaker_wav=speaker_wav)
         """Generate time-aligned TTS audio from a translated JSON transcript.
         
         speaker_voices: optional dict mapping speaker label to voice WAV path
