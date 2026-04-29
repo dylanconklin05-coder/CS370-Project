@@ -60,21 +60,18 @@ async def tts_endpoint(
     source_path = str(trans_dir / f"{title}.json")
     if speaker_wav is None:
         speaker_wav = resolve_speaker_wav(settings.speakers_dir, "es")
-    # Build speakerntovoice mapping
+    # Build speaker → voice mapping using resolve_speaker_wav
     speaker_voices = None
     try:
         with open(source_path) as f:
             trans_data = json.load(f)
         segments = trans_data.get("segments", [])
-        speakers = sorted(set(s["speaker"] for s in segments if "speaker" in s))
-        if speakers:
-            speakers_dir = settings.data_dir / "speakers" / "es"
-            voice_files = sorted(speakers_dir.glob("*.wav")) if speakers_dir.exists() else []
-            if voice_files:
-                speaker_voices = {
-                    speaker: str(voice_files[i % len(voice_files)])
-                    for i, speaker in enumerate(speakers)
-                }
+        unique_speakers = sorted(set(seg.get("speaker", "SPEAKER_00") for seg in segments))
+        if unique_speakers:
+            speaker_voices = {
+                spk: resolve_speaker_wav(settings.speakers_dir, "es", spk)
+                for spk in unique_speakers
+            }
     except Exception:
         speaker_voices = None
 
