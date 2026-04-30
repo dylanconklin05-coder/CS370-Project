@@ -30,16 +30,20 @@ def _segments_to_vtt(segments: list[dict]) -> str:
 
     lines = ["WEBVTT", ""]
     prev_text: str | None = None
+    current_time = segs[0]["start"]
+
     for i, seg in enumerate(segs, 1):
-        start = _format_vtt_time(seg["start"])
-        end = _format_vtt_time(seg["end"])
+        duration = seg["end"] - seg["start"]
+
+        start = _format_vtt_time(current_time)
+        end = _format_vtt_time(current_time + duration)
+
+        current_time += duration
+
         text = seg.get("text", "").strip()
         lines.append(str(i))
         lines.append(f"{start} --> {end}")
-        if prev_text:
-            lines.append(f"{text}\n{prev_text}")
-        else:
-            lines.append(text)
+        lines.append(text)
         lines.append("")
         prev_text = text
     return "\n".join(lines)
